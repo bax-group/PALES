@@ -1,0 +1,361 @@
+# PALES 2.1 — stand-alone Linux port
+
+PALES means **Prediction of ALignmEnt from Structure**. It analyzes residual
+dipolar couplings (RDCs) and predicts weak molecular alignment from a
+three-dimensional structure. The original program was written by Markus
+Zweckstetter and described with Ad Bax in:
+
+> M. Zweckstetter and A. Bax, “Prediction of Sterically Induced Alignment in a
+> Dilute Liquid Crystalline Phase: Aid to Protein Structure Determination by
+> NMR,” *J. Am. Chem. Soc.* **122** (2000), 3791–3792.
+
+The historical documentation, scientific background, examples, and original
+binary downloads are on the
+[official PALES website](https://spin.niddk.nih.gov/bax-apps/software/PALES/index.html).
+Those downloads targeted Solaris, IRIX, and Red Hat Linux 6.0. This source tree
+is an independent build modernization for current Linux systems.
+
+## What PALES does
+
+The program exposes the five modules documented by the original site:
+
+1. **Steric PALES (`-stPales`, the default):** predicts the magnitude and
+   orientation of alignment from a standard PDB structure and can predict RDCs
+   from that tensor. The model is intended for media dominated by steric
+   interactions, such as bicelles and PEG-based systems.
+2. **Free-format PALES (`-stPalesFree`):** performs the same shape-based
+   simulation for a general array of Cartesian coordinates.
+3. **RDC best fit (`-bestFit`):** fits a five-component Saupe order matrix to a
+   structure and measured RDCs, or predicts RDCs from a supplied tensor.
+4. **Tensor analysis (`-anA`):** combines or compares two alignment tensors and
+   reports their eigensystems and orientations.
+5. **RDC-set analysis (`-anDC`):** combines or statistically compares two RDC
+   tables.
+
+PALES was the successor to SSIA. Compared with SSIA, the original release added
+support for proteins, nucleic acids, and oligosaccharides; arbitrary coupling
+types; command-line simulation controls; multi-chain PDB files and atom
+selection; NMRWish/DYNAMO-compatible tables; consistent internuclear-distance
+conventions; and additional tensor/RDC analysis tools.
+
+Typical applications include checking a structure against measured RDCs,
+distinguishing monomeric and multimeric models, and studying multiple-conformer
+models of flexible macromolecules.
+
+## Status of this port
+
+This version builds without NMRPipe, DYNAMO, Tcl, or a proprietary external
+library. The local compatibility implementation provides:
+
+- fixed-column PDB ATOM/HETATM input and PDB output;
+- residue, atom, chain, segment, region, and glob/regular-expression selection;
+- NMRPipe-style RDC-table input;
+- atom mapping with residue offsets and `H`/`HN` name compatibility;
+- dipolar interaction calculation when `DI` is absent;
+- weighted five-parameter Saupe-matrix least-squares fitting;
+- RDC fit statistics, coordinate storage, and tensor helpers.
+
+The active build contains 29 C sources. Sixty-four alternative revisions,
+experiments, and incompatible DYNAMO implementations are retained under
+[`legacy/`](legacy/) and are not compiled.
+
+The SVD best-fit path and table output are covered by a deterministic test. The
+local Protein G best-fit example has also been run successfully. The historical
+non-linear `-nofixed`/`-dadr` optimizer depended on the full DYNAMO library and
+has not been reconstructed exactly; validate those modes against a trusted
+reference before using them quantitatively. The same caution applies to
+scientific paths not covered by the supplied regression test.
+
+## Building on Linux
+
+Requirements:
+
+- a current GCC or Clang C compiler;
+- GNU Make;
+- the standard C math library (`libm`).
+
+On Ubuntu, the normal compiler toolchain can be installed with:
+
+```sh
+sudo apt update
+sudo apt install build-essential
+```
+
+Build and run the deterministic check:
+
+```sh
+make
+make check
+```
+
+The executable is `./PALES`. The code intentionally uses GNU89 mode because the
+original sources rely on pre-ANSI declarations and calling conventions.
+
+Useful targets and overrides:
+
+```sh
+make help
+make print-config
+make debug
+make sanitize
+make clean
+make CC=clang CFLAGS='-O3 -g'
+make install PREFIX="$HOME/.local"
+```
+
+`make check` fits the six vectors in `tests/bestfit.*`, checks that a Saupe
+matrix is written, and leaves its output under `build/`.
+
+## Getting help
+
+The legacy program prints its complete command-line reference with:
+
+```sh
+./PALES -help
+```
+
+PALES writes results to standard output when the corresponding output filename
+is omitted. For reproducible runs, specifying `-outD`, `-outA`, and/or
+`-pdbRot` is recommended.
+
+## Included Protein G examples
+
+The files under [`examples/`](examples/) correspond to the test data described
+by the official PALES site:
+
+| File | Contents |
+| --- | --- |
+| `examples/1IGD_H_s.pdb` | Shortened, protonated Protein G domain; 568 atom records, residues 7–61. |
+| `examples/dc_1IGD.tab` | 41 measured backbone N–HN RDCs, numbered as residues 2–56. |
+| `examples/worlmapTemplate.tab` | 4,040 mapping coordinates for tensor-orientation plots. The historical local filename intentionally spells “worlmap” without a `d`. |
+
+The PDB numbering is five greater than the RDC-table numbering. Therefore the
+examples use `-s1 2 -a1 7`: `-s1` defines the first residue in the RDC segment,
+and `-a1` maps it to the first corresponding PDB residue.
+
+Create an output directory before trying the commands below:
+
+```sh
+mkdir -p results
+```
+
+### 1. Steric alignment prediction
+
+Predict alignment from the PDB shape alone:
+
+```sh
+./PALES \
+  -pdb examples/1IGD_H_s.pdb \
+  -outD results/steric.tbl
+```
+
+Predict alignment and back-calculate the supplied RDCs:
+
+```sh
+./PALES \
+  -inD examples/dc_1IGD.tab \
+  -pdb examples/1IGD_H_s.pdb \
+  -outD results/steric-rdc.tbl \
+  -s1 2 -a1 7 \
+  -pdbRot results/steric-rotated.pdb
+```
+
+Frequently used steric controls include:
+
+- `-bic` or `-pf1` for the wall/bicelle or rod model;
+- `-wv` for liquid-crystal concentration;
+- `-dot` and `-digPsi` for orientation sampling;
+- `-dGrid` for grid spacing;
+- `-rM` for model radius;
+- `-lcS` for liquid-crystal order;
+- `-rA` for the atom-radius increment;
+- `-H`/`-noH` and `-surf`/`-nosurf` for atom and surface selection.
+
+For example, the more explicit simulation shown on the original site becomes:
+
+```sh
+./PALES \
+  -inD examples/dc_1IGD.tab \
+  -pdb examples/1IGD_H_s.pdb \
+  -outD results/steric-custom.tbl \
+  -s1 2 -a1 7 -r1 10 -rN 60 \
+  -bic -wv 0.03 -dGrid 0.3 -dot 133 -digPsi 23 -rM 33.0 \
+  -lcS 0.83 -rA 0.3 -H -nosurf
+```
+
+### 2. Free-format coordinate simulation
+
+```sh
+./PALES \
+  -stPalesFree \
+  -pdbF examples/1IGD_H_s.pdb \
+  -outA results/free-format.tbl
+```
+
+The steric simulation controls listed above can also be supplied in this mode.
+
+### 3. Best fit of measured RDCs
+
+Fit the Saupe matrix by singular value decomposition:
+
+```sh
+./PALES \
+  -bestFit \
+  -inD examples/dc_1IGD.tab \
+  -pdb examples/1IGD_H_s.pdb \
+  -outD results/bestfit.tbl \
+  -s1 2 -a1 7 \
+  -pdbRot results/bestfit-rotated.pdb
+```
+
+The verified stand-alone run maps 38 usable couplings from the 41 table rows,
+completes with exit status zero, and reports an RDC RMS of approximately 0.625
+Hz.
+
+To evaluate a user-supplied order matrix, give the elements in this order:
+`Szz`, `Sxx-Syy`, `Sxy`, `Sxz`, `Syz`.
+
+```sh
+./PALES \
+  -bestFit \
+  -inD examples/dc_1IGD.tab \
+  -pdb examples/1IGD_H_s.pdb \
+  -outD results/saupe-predicted.tbl \
+  -s1 2 -a1 7 \
+  -saupe -9.2042e-05 2.3990e-04 3.8255e-04 -4.4549e-04 3.9788e-04
+```
+
+The historical interface also accepts `-fixed`, `-dadr`, and `-nofixed` with
+`-da`, `-dr`, `-psi`, `-theta`, and `-phi`. See the compatibility warning above
+before relying on the non-linear variants in this port.
+
+`-map N -outMap FILE` samples orientation-error space for `N` iterations. The
+coordinates can be combined with `examples/worlmapTemplate.tab` for plotting.
+
+### 4. Alignment-tensor analysis
+
+```sh
+./PALES \
+  -anA \
+  -outA results/tensor-analysis.tbl \
+  -inS1 -8.9631e-05 2.4300e-04 3.8479e-04 -4.4164e-04 3.9631e-04 \
+  -inS2 -1.3042e-05 4.1560e-04 3.5832e-04 -4.6099e-04 4.0923e-04
+```
+
+The default operation is subtraction. `-add`, `-sub`, `-mul`, `-div`, and
+`-max` select other operations; `-c1` and `-c2` scale the two inputs.
+
+### 5. RDC-table analysis
+
+```sh
+./PALES \
+  -anDC \
+  -inD1 examples/dc_1IGD.tab \
+  -inD2 examples/dc_1IGD.tab \
+  -outD results/rdc-analysis.tbl \
+  -s1 20 -sN 40
+```
+
+This mode supports the same basic arithmetic operation flags for two coupling
+sets and reports comparison statistics.
+
+## PDB and atom selection
+
+Without an explicit region, the program derives its residue limits from the
+input structure. Common selection flags are:
+
+- `-res ID`, or `-r1 FIRST -rN LAST`;
+- `-atom`, `-resName`, `-chain`, and `-seg` name lists;
+- `-exact`, `-glob`, or `-regex` matching, with per-field forms such as
+  `-aGlob` and `-rRegex`;
+- `-clear`, `-set`, and `-inv` for selection control;
+- `-near R -x X -y Y -z Z` for a sphere;
+- `-x1/-xn`, `-y1/-yn`, and `-z1/-zn` for a rectangular region.
+
+Alternate-location identifiers other than blank or `A` are skipped by the
+stand-alone reader. HETATM records are excluded by default and can be selected
+with the record-type flags shown by `-help`.
+
+## RDC table format
+
+The preferred format follows NMRPipe/NMRWish conventions. A table can contain
+`DATA SEQUENCE` records, must identify its columns with `VARS`, and normally
+includes a matching `FORMAT` line. Blank lines and lines beginning with `#` are
+ignored.
+
+Required atom/vector columns are:
+
+```text
+RESID_I RESNAME_I ATOMNAME_I RESID_J RESNAME_J ATOMNAME_J
+```
+
+Optional `CHAINNAME_I/J` and `SEGNAME_I/J` columns disambiguate multi-chain or
+multi-segment structures. Numeric columns are:
+
+- `D` or `D_OBS`: observed RDC, conventionally isotropic minus aligned
+  splitting;
+- `DD` or `SIGMA`: experimental uncertainty;
+- `W`: weighting factor;
+- `DI`: full dipolar interaction value, calculated from coordinates and atom
+  types when absent.
+
+Atom names and residue identities should match the PDB. The stand-alone mapper
+also treats `H` and `HN` as equivalent. A minimal table is:
+
+```text
+VARS   RESID_I RESNAME_I ATOMNAME_I RESID_J RESNAME_J ATOMNAME_J D DD W
+FORMAT %5d %6s %6s %5d %6s %6s %9.3f %9.3f %.2f
+    2 THR N 2 THR HN -15.524 1.000 1.00
+```
+
+The reader also accepts a simple seven-column form without `VARS`; the labeled
+form is strongly recommended.
+
+## Understanding output
+
+Depending on the selected module and verbosity, output includes:
+
+- simulation parameters;
+- the five independent Saupe/order-matrix elements;
+- irreducible representation and general magnitude;
+- tensor eigenvalues and eigenvectors;
+- equivalent Euler-angle solutions;
+- axial and rhombic components;
+- the number of mapped RDCs, RMS, chi-square, correlation, Q factor, and
+  regression statistics;
+- observed and calculated RDCs and their differences in table form.
+
+PALES reports clockwise `alpha`, `beta`, `gamma` rotations about `z`, then
+`y'`, then `z''`. The conventional ranges are 0–360°, 0–180°, and 0–360°.
+Four equivalent orientations can arise from eigenvector sign ambiguity.
+
+The original documentation defines the three-dimensional tensor quantities as
+`Da = Szz/2` and `Dr = (Sxx-Syy)/3`. Alignment magnitude is better judged from
+the irreducible norm when rhombicity is high; using only the largest eigenvalue
+can be misleading. To express `Da` in hertz, multiply it by the relevant
+dipolar interaction value.
+
+## Source layout
+
+```text
+Makefile          current Linux build
+src/              PALES C sources and their local headers
+src/pales.c       main PALES program and modes
+src/standalone.c  local PDB/RDC/tensor compatibility implementation
+include/          active compatibility headers and support sources
+examples/         historical Protein G data and map coordinates
+tests/            deterministic best-fit regression input
+legacy/           archived, unbuilt historical C revisions
+```
+
+The larger historical `pdb.c`, `dc.c`, and `dynamo.c` implementations under
+`legacy/include/` target a different DYNAMO API and require dependencies not
+present in this archive. They are retained for reference only.
+
+## Historical name
+
+The official site explains that Pales was a Roman pastoral deity whose April
+festival was associated with the legendary founding date of Rome. The name was
+later used for an asteroid and the butterfly *Boloria pales*—as well as for
+Prediction of ALignmEnt from Structure.
+
